@@ -2479,6 +2479,7 @@ _MENU = [
         ("ghost", "ᴀᴘɴᴇ ᴍsɢ ᴀᴜᴛᴏ-ᴅᴇʟ"),
         ("echo", "ʀᴇᴘᴇᴀᴛ ᴜsᴇʀ"),
         ("unecho", "ʀᴇᴘᴇᴀᴛ ʙᴀɴᴅ"),
+        ("magic", "ꜰᴏɴᴛ + ʀᴇᴀᴄᴛ sᴄʀᴏʟʟ"),
         ("ar", "ʀᴇᴀᴄᴛ + ʟᴏᴄᴋ · ʀᴇᴘʟʏ ᴘᴇ"),
         ("ar off", "ɪs ᴄʜᴀᴛ ᴋᴇ ʟᴏᴄᴋs ʙᴀɴᴅ"),
         ("sar", "ᴍᴇʀᴇ ᴍsɢs ᴘᴇ ʀᴇᴀᴄᴛ · ᴏꜰꜰ"),
@@ -2859,8 +2860,13 @@ for _k in range(len(CATS)):
 
 
 # ── detailed guides (`.help <cmd>` pe poora tareeqa) ──────────
+_P_2FA = '"2fa password chahiye"'   # backslash f-string me nahi daal sakte (<py3.12)
+
+
 GUIDES = {
     "addbot": lambda: guide_addbot(),
+    "magic": lambda: guide_magic(),
+    "mx": lambda: guide_magic(),
     "music": lambda: guide_music(),
     "song": lambda: guide_music(),
     "play": lambda: guide_music(),
@@ -2880,7 +2886,7 @@ GUIDES = {
         f"{E['dot']} {mono('.p mera_password')}",
         "",
         f"{E['note']} {sc('sirf tab jab telegram bole')}",
-        f"   {sc('\"2fa password chahiye\"')}",
+        f"   {sc(_P_2FA)}",
     ]),
     "user": lambda: panel([
         f"{E['bot']} {sb('CONNECTED USERBOTS')}",
@@ -5998,6 +6004,478 @@ async def cmd_unecho(event, arg):
     ECHO_USERS.difference_update(targets)
     await done(event, f"{E['no']} {sc('echo off')} {E['arrow']} "
                       f"{mono(', '.join(map(str, sorted(targets))))}", secs=6)
+
+
+# ══════════════════════════════════════════════════════════════
+#           ✨  ᴍᴀɢɪᴄ  ·  ꜰᴏɴᴛ sᴄʀᴏʟʟ + ʀᴇᴀᴄᴛɪᴏɴ sᴄʀᴏʟʟ
+# ══════════════════════════════════════════════════════════════
+# • .magic                → toggle  (reply karke bhejo → usi msg pe ek baar)
+# • .magic on / off        → mere har naye text msg pe effect
+# • .magic status          → live config + kitne msg abhi chal rahe
+# • .magic speed 1         → ek font kitni der tikta hai  (0.4 – 5 s)
+# • .magic rounds 3        → 10 fonts ka kitni baar cycle  (0 = jab tak off)
+# • .magic fonts 10        → kitne font use ho  (2 – 10)
+# • .magic reacts 20       → kitni reaction scroll  (0 = sirf font)
+# • .magic rdelay 0.5      → reaction switch ka gap  (0.2 – 3 s)
+# • .magic big on          → big (animated) reaction effect
+# • .magic cooldown 5      → do animations ke beech minimum gap (flood se bachne ke liye)
+# • .magic stop            → chal rahe saare scroll turant band + text wapas
+#
+# ⚠️ Har font-switch = 1 edit, har reaction = 1 react call. Isliye:
+#    • FloodWait aate hi poora scroll rukta hai (MAGIC_PAUSE) — bot
+#      zid nahi karta, warna account pe restriction aati.
+#    • ek chat me max MAGIC_MAX_LIVE animations ek saath.
+#    • scroll khatam hote hi message apne ORIGINAL text + zero reaction
+#      pe restore ho jata hai (koi kachra nahi chhootega).
+F_MAGIC = "magic.json"
+
+# 10 fonts — style kit ke helpers (fraktur ke liye _FRK map seedha)
+MAGIC_FONTS = [
+    ("bold sans", sb),
+    ("serif bold", bs),
+    ("serif italic", its),
+    ("serif bold italic", sbi),
+    ("mono", mono),
+    ("script", scr),
+    ("script bold", scrb),
+    ("double struck", dbl),
+    ("small caps", sc),
+    ("fraktur", lambda t: _xf(t, _FRK)),
+]
+
+# fallback reactions — chat inme se jo allow karta hai wahi lagta hai
+MAGIC_EMOJIS = ["👍", "❤️", "🔥", "🥰", "👏", "😁", "🤩", "🫡", "🤔", "🤯",
+                "😱", "🤬", "😢", "🎉", "🤮", "💩", "🙏", "👎", "🤐", "😈"]
+
+MAGIC_DEFAULTS: Dict[str, Any] = {
+    "on": False, "speed": 1.0, "rounds": 3, "fonts": 10,
+    "reacts": 20, "rdelay": 0.5, "big": False, "cooldown": 5.0,
+}
+
+# key → (min, max, type) — config file galat bhi ho to crash nahi
+MAGIC_LIMITS: Dict[str, tuple] = {
+    "speed": (0.4, 5.0, float), "rdelay": (0.2, 3.0, float),
+    "cooldown": (0.0, 60.0, float), "rounds": (0, 20, int),
+    "fonts": (2, 10, int), "reacts": (0, 20, int),
+}
+
+MAGIC_MAX_TEXT = 700      # isse lamba msg animate nahi (edit bohot heavy hota hai)
+MAGIC_MAX_LIVE = 3        # ek saath kitne message scroll kar sakte hain
+MAGIC_SWEEP_MAX = 800     # reaction scroll ka hard cap (rounds 0 = ∞ ke liye)
+
+MAGIC: Dict[str, Any] = dict(MAGIC_DEFAULTS)
+MAGIC_TASKS: Dict[str, asyncio.Task] = {}      # "chat:msg" → task
+MAGIC_PAUSE: Dict[str, float] = {"until": 0.0}  # flood wait → yahan tak sab pause
+_MAGIC_LAST_FIRE: list = [0.0]
+_MAGIC_ALLOWED: Dict[int, tuple] = {}           # client id → (time, allowed emojis)
+
+
+def _magic_save():
+    return save_json(F_MAGIC, {k: MAGIC.get(k) for k in MAGIC_DEFAULTS})
+
+
+def _magic_load():
+    """data/magic.json → MAGIC · out-of-range / galat type values clamp ho jaati hain"""
+    raw = load_json(F_MAGIC, {})
+    if not isinstance(raw, dict):
+        return
+    for k in MAGIC_DEFAULTS:
+        if k not in raw:
+            continue
+        if k in ("on", "big"):
+            MAGIC[k] = bool(raw[k])
+            continue
+        lo, hi, cast = MAGIC_LIMITS[k]
+        try:
+            MAGIC[k] = min(max(cast(raw[k]), lo), hi)
+        except Exception:
+            pass
+
+
+_magic_load()
+
+
+def _magic_set_num(key, raw):
+    """ek numeric config set karo (clamped) — fail ho to None"""
+    lo, hi, cast = MAGIC_LIMITS[key]
+    try:
+        n = cast(str(raw).strip())
+    except Exception:
+        return None
+    MAGIC[key] = min(max(n, lo), hi)
+    _magic_save()
+    return MAGIC[key]
+
+
+def _magic_reap(task):
+    """fire-and-forget scroll task ka exception nigal jao (log me traceback na aaye)"""
+    try:
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            print(f"[MAGIC] {err_txt(exc, 60)}")
+    except Exception:
+        pass
+
+
+def _magic_spawn(chat, mid, orig, key, cli, ents=None):
+    """animation task banao + registry me daalo (pichla usi msg ka cancel)"""
+    old = MAGIC_TASKS.get(key)
+    if old is not None and not old.done():
+        old.cancel()
+    task = asyncio.create_task(_magic_run(chat, int(mid), orig, key, cli, ents))
+    task.add_done_callback(_magic_reap)
+    MAGIC_TASKS[key] = task
+    return task
+
+
+def _magic_key(chat, mid) -> str:
+    return "%s:%s" % (int(chat), int(mid))
+
+
+def _magic_live() -> int:
+    """kitne scroll abhi live hain (mar chuke tasks raaste me saaf)"""
+    for k in [k for k, t in MAGIC_TASKS.items() if t.done()]:
+        MAGIC_TASKS.pop(k, None)
+    return len(MAGIC_TASKS)
+
+
+def _magic_stop_all() -> int:
+    """chal rahe saare scroll band karo — har task ka finally text restore karta hai"""
+    n = 0
+    for k, t in list(MAGIC_TASKS.items()):
+        if not t.done():
+            t.cancel()
+            n += 1
+        MAGIC_TASKS.pop(k, None)
+    return n
+
+
+def _magic_flood(e) -> int:
+    """FloodWait → itni der ke liye poora magic pause (return: seconds)"""
+    try:
+        secs = min(max(int(getattr(e, "seconds", 5) or 5), 1), 120)
+    except Exception:
+        secs = 5
+    MAGIC_PAUSE["until"] = max(MAGIC_PAUSE["until"], time.time() + secs)
+    return secs
+
+
+def _magic_emoji_of(node):
+    """TL Reaction / MessageReaction* → unicode emoji (custom emoji chhod do)"""
+    for obj in (getattr(node, "reaction", None), node):
+        if obj is None or getattr(obj, "emoji_id", None):
+            continue
+        em = getattr(obj, "emoticon", None) or getattr(obj, "emoji", None)
+        if isinstance(em, str) and _EMOJI_RE.match(em.strip()):
+            return em.strip()
+    return None
+
+
+async def _magic_react_list(cli) -> list:
+    """is client ke allowed reactions (1 hr cache) — na mile to curated list"""
+    want = int(MAGIC["reacts"])
+    if want <= 0:
+        return []
+    cid = id(cli)
+    hit = _MAGIC_ALLOWED.get(cid)
+    if hit and time.time() - hit[0] < 3600:
+        return hit[1][:want]
+    got = []
+    try:
+        r = await cli(functions.messages.GetAvailableReactionsRequest(hash=0))
+        for node in (getattr(r, "available_reactions", None) or []):
+            em = _magic_emoji_of(node)
+            if em and em not in got:
+                got.append(em)
+    except Exception:
+        got = []
+    out = (got or MAGIC_EMOJIS)[:want]
+    _MAGIC_ALLOWED[cid] = (time.time(), out)
+    return out
+
+
+async def _magic_react_scroll(cli, chat, mid, emojis, stop):
+    """ek ke baad ek reaction — `stop` set hote hi ruk jata hai"""
+    n, i, fails = len(emojis), 0, 0
+    while not stop.is_set() and i < MAGIC_SWEEP_MAX:
+        try:
+            await cli(functions.messages.SendReactionRequest(
+                peer=chat, msg_id=int(mid),
+                reaction=[types.ReactionEmoji(emoticon=emojis[i % n])],
+                big=bool(MAGIC["big"])))
+            i += 1
+            fails = 0
+        except FloodWaitError as fw:
+            _magic_flood(fw)
+            return
+        except Exception as e:
+            if "MESSAGE_ID_INVALID" in str(e).upper():
+                return                       # message delete ho gaya
+            fails += 1
+            if fails >= 3:
+                return                       # is chat me ye reaction allowed nahi
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=MAGIC["rdelay"])
+        except asyncio.TimeoutError:
+            pass
+
+
+async def _magic_restore(cli, chat, mid, orig, ents=None, clear=True):
+    """original text + formatting wapas + meri reactions hata do"""
+    if clear:
+        try:
+            await cli(functions.messages.SendReactionRequest(
+                peer=chat, msg_id=int(mid), reaction=[]))
+        except Exception:
+            pass
+    try:
+        await cli.edit_message(chat, int(mid), orig, entities=ents or None)
+    except Exception:
+        pass
+
+
+async def _magic_run(chat, mid, orig, key, cli, ents=None):
+    """10 font × speed sec × rounds  +  parallel reaction scroll
+
+    ents = message ke asli entities (bold / link / mention) — font engine
+    char-to-char 1:1 mapping hai (length nahi badalta) isliye wahi offsets
+    scroll ke dauraan bhi valid rehte hain.
+    """
+    fonts = MAGIC_FONTS[:int(MAGIC["fonts"])]
+    rounds = int(MAGIC["rounds"])
+    stop = asyncio.Event()
+    rtask = None
+    emos = []
+    try:
+        emos = await _magic_react_list(cli)
+        if emos:
+            rtask = asyncio.create_task(
+                _magic_react_scroll(cli, chat, mid, emos, stop))
+        done_rounds = 0
+        while True:
+            for _label, fn in fonts:
+                if time.time() < MAGIC_PAUSE["until"]:
+                    return
+                try:
+                    await cli.edit_message(chat, int(mid), fn(orig),
+                                           entities=ents or None)
+                except MessageNotModifiedError:
+                    pass
+                except FloodWaitError as fw:
+                    _magic_flood(fw)
+                    return
+                except Exception:
+                    return                     # delete / permission → zyada zid nahi
+                await asyncio.sleep(MAGIC["speed"])
+            done_rounds += 1
+            if rounds and done_rounds >= rounds:
+                return
+    except Exception as e:
+        print(f"[MAGIC] {err_txt(e, 60)}")
+    finally:
+        stop.set()
+        if rtask and not rtask.done():
+            rtask.cancel()
+        try:
+            await asyncio.shield(
+                _magic_restore(cli, chat, mid, orig, ents, clear=bool(emos)))
+        except Exception:
+            pass
+        MAGIC_TASKS.pop(key, None)
+
+
+async def _magic_start(rep, cli, chat=None, mid=None, txt=None) -> bool:
+    """ek message pe scroll chala do (pichla usi msg ka ho to cancel)"""
+    chat = rep.chat_id if chat is None else chat
+    mid = rep.id if mid is None else mid
+    txt = (rep.raw_text or "") if txt is None else txt
+    ents = list(getattr(rep, "entities", None) or [])
+    _magic_spawn(chat, mid, txt, _magic_key(chat, mid), cli, ents)
+    return True
+
+
+@bot.on(events.NewMessage(outgoing=True))
+async def magic_outgoing(event):
+    """.magic ON → mere har naye (non-command) text message pe scroll.
+
+    Sirf fresh messages: reply-chains skip (bot ka apna output reply hota
+    hai → usse animation ka fight nahi hoga), media skip, commands skip.
+    """
+    try:
+        if not MAGIC["on"]:
+            return
+        txt = event.raw_text or ""
+        if not (2 <= len(txt) <= MAGIC_MAX_TEXT) or not txt.strip():
+            return
+        if getattr(event, "is_reply", False):
+            return
+        if getattr(getattr(event, "message", None), "media", None):
+            return
+        if _looks_like_cmd(txt) or _magic_live() >= MAGIC_MAX_LIVE:
+            return
+        if time.time() < MAGIC_PAUSE["until"]:
+            return
+        if time.time() - _MAGIC_LAST_FIRE[0] < float(MAGIC["cooldown"]):
+            return
+        key = _magic_key(event.chat_id, event.id)
+        if key in MAGIC_TASKS:
+            return
+        _MAGIC_LAST_FIRE[0] = time.time()
+        cli = getattr(event, "client", None) or bot
+        ents = list(getattr(getattr(event, "message", None), "entities", None) or [])
+        _magic_spawn(event.chat_id, event.id, txt, key, cli, ents)
+    except Exception as e:
+        print(f"[MAGIC] {err_txt(e, 60)}")
+
+
+def _magic_left() -> int:
+    return max(0, int(round(MAGIC_PAUSE["until"] - time.time())))
+
+
+def _magic_state_rows() -> list:
+    """status/panel rows — config + live info ek jagah"""
+    L = [
+        kv("state", "ON" if MAGIC["on"] else "OFF",
+           E["ok"] if MAGIC["on"] else E["no"]),
+        kv("fonts", f"{int(MAGIC['fonts'])} × {MAGIC['speed']}s", E["star"]),
+        kv("rounds", "∞ (jab tak off)" if not int(MAGIC["rounds"])
+           else str(int(MAGIC["rounds"])), E["film"]),
+        kv("reactions", "off (sirf font)" if not int(MAGIC["reacts"])
+           else f"{int(MAGIC['reacts'])} × {MAGIC['rdelay']}s", E["heart"]),
+        kv("big", "on" if MAGIC["big"] else "off", E["spark"]),
+        kv("cooldown", f"{MAGIC['cooldown']}s", E["clock"]),
+        kv("live now", f"{_magic_live()} / {MAGIC_MAX_LIVE}", E["bolt"]),
+    ]
+    left = _magic_left()
+    if left:
+        L.append(kv("flood pause", f"{left}s baki", E["wait"]))
+    return L
+
+
+def guide_magic():
+    return panel([
+        f"{E['wand']} {sb('MAGIC')} {E['arrow']} {sc('font + reaction scroll')}",
+        "",
+        f"{E['star']} {sc('ek message pe one-shot')}",
+        f"  {mono('.magic')} {sc('→ replied message pe chalao')}",
+        "",
+        f"{E['star']} {sc('mode on/off')}",
+        f"  {mono('.magic on')} {sc('→ mere har naye msg pe effect')}",
+        f"  {mono('.magic off')} {sc('→ band + restore')}",
+        f"  {mono('.magic stop')} {sc('→ chal raha scroll turant band')}",
+        "",
+        f"{E['star']} {mono(str(len(MAGIC_FONTS)))} {sc('fonts')}",
+        "  " + " · ".join(mono(n) for n, _f in MAGIC_FONTS),
+        "",
+        f"{E['star']} {sc('tuning')}",
+        f"  {mono('.magic speed 0.6')} {sc('(har font)')}",
+        f"  {mono('.magic rounds 5')} {sc('(0 = jab tak off)')}",
+        f"  {mono('.magic reacts 20')} {sc('(0 = sirf font)')}",
+        f"  {mono('.magic big on')} {sc('(animated reaction)')}",
+        "",
+        f"{E['warn']} {sc('flood wait aaye to scroll khud ruk jata hai')}",
+        f"{E['dot']} {sc('scroll ke baad text original pe wapas')}",
+    ], title=f"{E['film']} {sc('kaise chalta hai')}")
+
+
+@register_cmd("magic", "mx")
+async def cmd_magic(event, arg):
+    """.magic — mere message ko 10 font me scroll + 20 reaction scroll
+    on  = mere har naye text msg pe, off = band, reply = usi msg pe ek baar
+    """
+    a = (arg or "").strip().split()
+    cli = getattr(event, "client", None) or bot
+
+    # ── bina arg: reply → usi msg pe ek baar · warna global toggle
+    if not a:
+        try:
+            rep = await event.get_reply_message()
+        except Exception:
+            rep = None
+        if rep is not None:
+            me = int(getattr(event, "sender_id", 0) or 0)
+            if int(getattr(rep, "sender_id", 0) or 0) != me:
+                return await flash(event, f"{E['no']} {sc('sirf apne message pe magic')} "
+                                          f"{E['lock']}", secs=6)
+            if not (rep.raw_text or "").strip():
+                return await flash(event, f"{E['no']} {sc('is message me text nahi hai')}", secs=6)
+            if len(rep.raw_text) > MAGIC_MAX_TEXT:
+                return await flash(event, f"{E['warn']} {sc('message bohot lamba hai')} "
+                                          f"{E['arrow']} {mono('>' + str(MAGIC_MAX_TEXT))}", secs=7)
+            await _magic_start(rep, cli)
+            return await done(event, panel(
+                [f"{E['wand']} {sc('magic chal raha hai')} {E['arrow']} "
+                 f"{mono(str(int(MAGIC['fonts'])))} {sc('fonts')} × "
+                 f"{mono(str(MAGIC['speed']) + 's')}"
+                 + (f" {E['arrow']} {mono(str(int(MAGIC['reacts'])))} {sc('reactions')}"
+                    if int(MAGIC['reacts']) else ""),
+                 "",
+                 f"{E['dot']} {sc('band karo')} {E['arrow']} {mono('.magic stop')}",
+                 f"{E['dot']} {sc('poora mode')} {E['arrow']} {mono('.magic on')}",
+                 ], title=f"{E['spark']} {sc('one-shot')}"), secs=9)
+        MAGIC["on"] = not MAGIC["on"]
+        if not MAGIC["on"]:
+            _magic_stop_all()
+        _magic_save()
+        return await done(event, panel(
+            [f"{E['wand']} {sc('magic')} {E['arrow']} "
+             f"{mono('ON' if MAGIC['on'] else 'OFF')}",
+             "",
+             f"{E['dot']} {sc('ab')} {mono(('mere har naye msg pe scroll hoga') if MAGIC['on'] else 'kuch nahi')}",
+             f"{E['dot']} {mono('.magic stop')} {sc('· turant band + text wapas')}",
+             ], title=f"{E['spark']} {sc('mode')}"), secs=9)
+
+    key = a[0].lower()
+    if key in ("on", "enable", "start"):
+        MAGIC["on"] = True
+        _magic_save()
+        return await done(event, f"{E['wand']} {sc('magic on')} {E['arrow']} "
+                                 f"{sc('mere har naye msg pe font + reaction scroll')}", secs=8)
+    if key in ("off", "disable", "stop", "band"):
+        was = MAGIC["on"]
+        MAGIC["on"] = False
+        n = _magic_stop_all()
+        _magic_save()
+        return await done(event, f"{E['no']} {sc('magic off')} {E['arrow']} "
+                                 f"{mono(str(n))} {sc('scroll cancel')}"
+                                 + ("" if was else f" {E['dot']} {sc('mode pehle se off tha')}"),
+                          secs=8)
+    if key == "stop":
+        n = _magic_stop_all()
+        return await done(event, f"{E['ok']} {sc('scroll band')} {E['arrow']} "
+                                 f"{mono(str(n))} {sc('cancel · text restore ho gaya')}", secs=7)
+    if key in ("help", "guide"):
+        return await eor(event, guide_magic())
+    if key in ("status", "st"):
+        return await eor(event, panel(_magic_state_rows(),
+                                      title=f"{E['wand']} {sc('magic')} {VERSION}"))
+    if key == "big":
+        MAGIC["big"] = (len(a) < 2 or a[1].lower() in ("on", "1", "true", "yes", "enable"))
+        _magic_save()
+        return await done(event, f"{E['spark']} {sc('big reaction')} {E['arrow']} "
+                                 f"{mono('ON' if MAGIC['big'] else 'OFF')}", secs=7)
+    if key in MAGIC_LIMITS:
+        if len(a) < 2:
+            lo, hi, _c = MAGIC_LIMITS[key]
+            return await eor(event, f"{E['dot']} {mono(f'.magic {key} <{lo}-{hi}>')} "
+                                    f"{sc('abhi')} {E['arrow']} {mono(str(MAGIC[key]))}")
+        got = _magic_set_num(key, a[1])
+        if got is None:
+            return await flash(event, f"{E['no']} {mono(a[1])} {sc('number me nahi hai')}", secs=6)
+        extra = ""
+        if key == "reacts" and got == 0:
+            extra = f" {E['arrow']} {sc('ab sirf font scroll')}"
+        if key == "rounds" and got == 0:
+            extra = f" {E['arrow']} {sc('ab jab tak off, chalta rahega')}"
+        return await done(event, f"{E['ok']} {mono(key)} {E['arrow']} {mono(str(got))}{extra}",
+                          secs=7)
+    return await eor(event, f"{E['no']} {mono('.magic ' + key)} {sc('kuch nahi')}\n"
+                            f"{E['dot']} {mono('.magic on|off|stop|status')}\n"
+                            f"{E['dot']} {mono('.magic speed|rounds|fonts|reacts|rdelay|cooldown <n>')}\n"
+                            f"{E['dot']} {mono('.magic big on')}\n"
+                            f"{E['dot']} {mono('.magic help')} · {mono('.help magic')}")
 
 
 # ══════════════════════════════════════════════════════════════

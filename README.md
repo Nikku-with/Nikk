@@ -171,7 +171,7 @@ Menu ek saath nahi bheja jata — **alag alag menu hain** (total **184** menu en
 | `.m10` | blacklist | 8 |
 | `.m11` | broadcast | 5 |
 | `.m12` | messaging | 14 |
-| `.m13` | auto | 18 |
+| `.m13` | auto | 27 |
 | `.m14` | media | 6 |
 | `.m15` | ai & sudo | 5 |
 | `.m16` | bot manager | 12 |
@@ -351,6 +351,60 @@ sudo apt install ffmpeg
 
 ---
 
+## ✨ Magic — `.magic` (font scroll + reaction scroll)
+
+Mere **apne** message pe 10 alag-alag font 1s-1s me badalte hain, aur usi
+message pe 20 reaction fast scroll hote hain. Band karte hi message apne
+original text + formatting pe wapas.
+
+```bash
+.magic                 # reply karke → usi message pe ek baar
+.magic on              # mere har naye text message pe effect
+.magic off             # band (chal rahe scroll bhi cancel)
+.magic stop            # mode ON rahe, bas abhi ke scroll ruk jayein
+.magic status          # live config + kitne message abhi scroll me hain
+```
+
+| Config | Kya | Default | Range |
+|---|---|---|---|
+| `.magic speed 1` | ek font kitni der tikta hai | `1.0` s | `0.4 – 5` |
+| `.magic rounds 3` | 10 fonts ka kitni baar cycle | `3` | `0 – 20` · `0` = jab tak off |
+| `.magic fonts 10` | kitne font | `10` | `2 – 10` |
+| `.magic reacts 20` | kitni reaction scroll | `20` | `0 – 20` · `0` = sirf font |
+| `.magic rdelay 0.5` | reaction switch ka gap | `0.5` s | `0.2 – 3` |
+| `.magic big on` | big (animated) reaction | `off` | on/off |
+| `.magic cooldown 5` | do animations ke beech gap | `5` s | `0 – 60` |
+
+**Fonts** (style kit se hi, koi nayi mapping nahi):
+`bold sans · serif bold · serif italic · serif bold italic · mono · script ·
+script bold · double struck · small caps · fraktur`
+
+**Kaise kaam karta hai**
+
+```
+.magic on  →  tumhara naya text msg  →  ┌ edit ×10 (1s each) ×3 rounds
+                                        └ react ×20 (0.5s each)  ← parallel
+                             khatam → original text + entities restore, reactions clear
+```
+
+* Auto-mode sirf **fresh, non-command, bina-media, bina-reply** text message pe chalta hai —
+  bot ka apna output (jo reply hota hai) ya `.music …` jaisi command text kabhi animate nahi hoti.
+* Reaction list pehle **us chat ke allowed reactions** (`GetAvailableReactions`) se aati hai
+  (1 hr cache) — jo allowed nahi wo try hi nahi hota; API fail ho to curated 20 emoji.
+* Text **1:1 char mapping** se badalta hai → length same rehti hai, isliye message ke
+  asli **entities (bold / link / mention) scroll ke dauraan bhi intact** rehte hain.
+* **Flood safety:** FloodWait aate hi `MAGIC_PAUSE` set ho jata hai, poora scroll rukk
+  jata hai, message turant restore. Ek saath max **3** message scroll karte hain.
+* Config `data/magic.json` me save — restart ke baad bhi wahi rahega.
+* Guide: `.help magic` · detail: `.check magic`
+
+> ⚠️ Ye ek **visual effect** hai — Telegram pe har edit/react ek API call hota hai.
+> `speed` bahut kam ya `rounds 0` (infinite) + fast typing = FloodWait. Default
+> values isi hisaab se rakhi hain; `.magic cooldown 10` aur `.magic big off`
+> sab safe side rakhte hain.
+
+---
+
 ## 🤖 Bot manager — `.addbot` (sub-userbots)
 
 ```bash
@@ -505,7 +559,7 @@ sudo apt install ffmpeg
 | `.filters` | filter list | — |
 | `.unfilter` | filter hatao | — |
 
-### `.m13` — auto  (14 commands)
+### `.m13` — auto  (27 commands)
 
 | Command | Kya karta hai | Aliases |
 |---|---|---|
@@ -519,6 +573,7 @@ sudo apt install ffmpeg
 | `.ghost` | apne msg auto-del | — |
 | `.echo` | repeat user | — |
 | `.unecho` | repeat band | — |
+| `.magic` | font + reaction scroll | `mx` |
 | `.ar` | auto-react (emoji) | `art` |
 | `.sar` | auto-react band | `sart` |
 | `.art` | auto-reaction | — |
@@ -667,7 +722,7 @@ sudo apt install ffmpeg
 
 ## 🔎 A–Z index
 
-`add-bcdb` 🔒 · `addbl` · `addbot` 🔒 · `addbots` 🔒 · `admins` 🔒 · `afk` · `ai` · `alive` · `antidel` · `ar` (art) · `areply` · `arreply` · `auto` 🔒 · `autobc` 🔒 · `autofw` 🔒 · `autogpfp` 🔒 · `autooff` 🔒 · `autoread` · `baka` 🔒 (automation, bakastatus) · `ban` · `banall` 🔒 · `banner` · `bc` 🔒 · `bomb` · `c` 🔒 (code) · `calc` · `cancelbot` 🔒 (cc) · `copy` 🔒 (cp) · `d` · `del` · `del-bcdb` 🔒 · `delayspam` · `delban` · `delbl` · `delbot` 🔒 (removebot) · `delkick` · `delmine` · `delmute` · `delsave` · `delsudo` 🔒 (deladmin) · `demote` · `dspray` 🔒 (sspam) · `echo` · `emoji` · `endvc` (vcend) · `fact` · `fancy` · `fastgc` 🔒 · `fb` · `filter` · `filters` · `flag` · `flip` · `forward` · `fullpromote` · `fun1` · `fun2` · `fun3` · `fun4` · `fun5` · `fun6` · `fun7` · `fun8` · `fwd` · `gali` · `gban` 🔒 · `gbanlist` 🔒 · `gcast` 🔒 · `getmute` · `ghost` · `gmute` 🔒 (gm) · `gmutelist` 🔒 · `group` · `help` · `hrr` · `hy` · `id` · `ig` · `info` · `invitebots` 🔒 · `ip` · `join` 🔒 · `kick` · `kill` 🔒 · `killall` 🔒 (killeverything, killtasks) · `killoff` 🔒 · `leave` 🔒 · `list` 🔒 · `list-bcdb` · `listbl` · `listbots` · `lock` · `locks` · `love` · `love1` · `love2` · `love3` · `love4` · `love5` · `lovestory` · `menu` · `mspam` · `music` (mp3, play, song) · `mute` (m) · `nik` (nikstop) · `nikreply` (replynik) · `normal` 🔒 (nrml) · `notesadd` · `notesdelete` · `noteslist` · `p` 🔒 · `pin` · `ping` · `promote` · `promotebots` 🔒 · `pt` · `purge` · `purgeall` 🔒 · `purgeme` · `qrcode` · `raidstopall` (stopall) · `rembanner` · `reply` · `replygod` · `resend` 🔒 (rcode) · `resetdone` 🔒 · `rlock` · `rob` 🔒 · `roboff` 🔒 · `roll` · `rps` · `rr` · `sar` (sart) · `sarreply` · `save` · `savelist` · `setbot` 🔒 (setgame) · `setchannel` · `setgpfp` 🔒 · `sflag` · `sgod` · `short` · `shrr` · `slock` · `solve` 🔒 · `spam` · `speed` · `spray` 🔒 · `sreply` · `srlock` · `srr` · `staff` · `startvc` (vcstart) · `status` · `stop` · `stopareply` · `stopgpfp` 🔒 · `stoprob` 🔒 · `style` · `sudo` 🔒 (addadmin) · `tagall` · `tictactoe` · `title` · `tmute` · `tts` · `ttt` · `ucast` 🔒 · `unafk` · `unban` · `unecho` · `unfilter` · `ungban` 🔒 · `ungmute` 🔒 (gunmute) · `unlock` · `unmute` (sm) · `unpin` · `unwatchspam` · `uptime` · `user` 🔒 · `vdelete` (vdel) · `vget` (vpreview) · `vlist` (voicelist) · `vplay` (voiceplay) · `vsave` (voicesave) · `vstop` (vcstop) · `watchspam` · `weather` · `yt`
+`add-bcdb` 🔒 · `addbl` · `addbot` 🔒 · `addbots` 🔒 · `admins` 🔒 · `afk` · `ai` · `alive` · `antidel` · `ar` (art) · `areply` · `arreply` · `auto` 🔒 · `autobc` 🔒 · `autofw` 🔒 · `autogpfp` 🔒 · `autooff` 🔒 · `autoread` · `baka` 🔒 (automation, bakastatus) · `ban` · `banall` 🔒 · `banner` · `bc` 🔒 · `bomb` · `c` 🔒 (code) · `calc` · `cancelbot` 🔒 (cc) · `copy` 🔒 (cp) · `d` · `del` · `del-bcdb` 🔒 · `delayspam` · `delban` · `delbl` · `delbot` 🔒 (removebot) · `delkick` · `delmine` · `delmute` · `delsave` · `delsudo` 🔒 (deladmin) · `demote` · `dspray` 🔒 (sspam) · `echo` · `emoji` · `endvc` (vcend) · `fact` · `fancy` · `fastgc` 🔒 · `fb` · `filter` · `filters` · `flag` · `flip` · `forward` · `fullpromote` · `fun1` · `fun2` · `fun3` · `fun4` · `fun5` · `fun6` · `fun7` · `fun8` · `fwd` · `gali` · `gban` 🔒 · `gbanlist` 🔒 · `gcast` 🔒 · `getmute` · `ghost` · `gmute` 🔒 (gm) · `gmutelist` 🔒 · `group` · `help` · `hrr` · `hy` · `id` · `ig` · `info` · `invitebots` 🔒 · `ip` · `join` 🔒 · `kick` · `kill` 🔒 · `killall` 🔒 (killeverything, killtasks) · `killoff` 🔒 · `leave` 🔒 · `list` 🔒 · `list-bcdb` · `listbl` · `listbots` · `lock` · `locks` · `love` · `love1` · `love2` · `love3` · `love4` · `love5` · `lovestory` · `magic` (mx) · `menu` · `mspam` · `music` (mp3, play, song) · `mute` (m) · `nik` (nikstop) · `nikreply` (replynik) · `normal` 🔒 (nrml) · `notesadd` · `notesdelete` · `noteslist` · `p` 🔒 · `pin` · `ping` · `promote` · `promotebots` 🔒 · `pt` · `purge` · `purgeall` 🔒 · `purgeme` · `qrcode` · `raidstopall` (stopall) · `rembanner` · `reply` · `replygod` · `resend` 🔒 (rcode) · `resetdone` 🔒 · `rlock` · `rob` 🔒 · `roboff` 🔒 · `roll` · `rps` · `rr` · `sar` (sart) · `sarreply` · `save` · `savelist` · `setbot` 🔒 (setgame) · `setchannel` · `setgpfp` 🔒 · `sflag` · `sgod` · `short` · `shrr` · `slock` · `solve` 🔒 · `spam` · `speed` · `spray` 🔒 · `sreply` · `srlock` · `srr` · `staff` · `startvc` (vcstart) · `status` · `stop` · `stopareply` · `stopgpfp` 🔒 · `stoprob` 🔒 · `style` · `sudo` 🔒 (addadmin) · `tagall` · `tictactoe` · `title` · `tmute` · `tts` · `ttt` · `ucast` 🔒 · `unafk` · `unban` · `unecho` · `unfilter` · `ungban` 🔒 · `ungmute` 🔒 (gunmute) · `unlock` · `unmute` (sm) · `unpin` · `unwatchspam` · `uptime` · `user` 🔒 · `vdelete` (vdel) · `vget` (vpreview) · `vlist` (voicelist) · `vplay` (voiceplay) · `vsave` (voicesave) · `vstop` (vcstop) · `watchspam` · `weather` · `yt`
 
 ---
 
