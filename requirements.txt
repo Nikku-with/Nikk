@@ -1,0 +1,26 @@
+# ── NIK USERBOT ─────────────────────────────────────────────
+# pip install -r requirements.txt
+# ────────────────────────────────────────────────────────────
+
+# core
+telethon>=1.34
+requests>=2.31
+
+# qr login + tts
+qrcode[pil]>=7.4
+gTTS>=2.5
+
+# .music / .yt  (filename = song title)
+yt-dlp>=2024.1.1
+
+# .m24 voice chat  (startvc / vplay / vsave)
+py-tgcalls>=3.0
+
+# optional — telethon crypto 3-4x fast (recommended)
+cryptg>=0.4
+
+# ────────────────────────────────────────────────────────────
+# VC ke liye system package bhi chahiye:
+#   ubuntu/debian : sudo apt install ffmpeg
+#   termux        : pkg install ffmpeg
+# ────────────────────────────────────────────────────────────
